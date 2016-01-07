@@ -17,7 +17,7 @@ with your own.
 
 ## Authentication
 
-Requests to SiaqodbCloud service must be signed with a HMAC-SHA256 signature.They must include information that SiaqodbCloud can use to authenticate the requestor. Requests are signed using the 'access_key_id' (which is public and included in header of the request) and 'secret_key' which is used to build HMAC-SHA256 signature. The 'secret_key' must be provided in client app but is never transmitted. If CouchDB is used as server side database then 'access_key_id' and 'secret_key' should be stored in sys_accesskeys. 
+Requests to SiaqodbCloud service are signed with a HMAC-SHA256 signature. Client code needs 'access_key_id' (which is public and included in header of the request) and 'secret_key' which is used to build HMAC-SHA256 signature. The 'secret_key' must be provided in client app but is never transmitted. If CouchDB is used as server side database then 'access_key_id' and 'secret_key' should be stored in sys_accesskeys. 
 Example of a JSON record stored in CouchDB database called 'sys_accesskeys':
 
 ```JSON
