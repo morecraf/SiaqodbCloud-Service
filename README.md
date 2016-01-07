@@ -32,14 +32,16 @@ Example of a JSON record stored in CouchDB database called 'sys_accesskeys':
 
 Once you have setup ready and WebAPI running, you can now Sync Siaqodb with CouchDB, example:
 ```java
-  using (SiaqodbSync syncContext = new SiaqodbSync("http://localhost:11735/v0/", "3ba69b5835dgdb308766b4756b00079a", "4362kljh63k4599hhgm"))
-            {
-                 IBucket bucket = siaqodb.Documents["persons"];
-                 syncContext.Push(bucket);//push local changes to server
-                 syncContext.Pull(bucket);//pull server changes to client db
+  using (SiaqodbSync syncContext = new SiaqodbSync("http://localhost:11735/v0/", 
+  "3ba69b5835dgdb308766b4756b00079a", 
+  "4362kljh63k4599hhgm"))
+ {
+    IBucket bucket = siaqodb.Documents["persons"];
+    syncContext.Push(bucket);//push local changes to server
+    syncContext.Pull(bucket);//pull server changes to client db
             
-            }
-            ```
+   }
+ ```
 
 
 
