@@ -117,7 +117,11 @@ namespace SiaqodbCloudService.Repository
                         {
                             using (var clientLog = new MyCouchClient(DbServerUrl, SyncLogBucket))
                             {
-                                logItem = (await clientLog.Entities.GetAsync<SyncLogItem>(uploadAnchor)).Content;
+                                var item = await clientLog.Documents.GetAsync(uploadAnchor);
+                                if (item.IsSuccess)
+                                {
+                                    logItem = Newtonsoft.Json.JsonConvert.DeserializeObject<SyncLogItem>(item.Content);
+                                }
                             }
                         }
                         foreach (var row in response.Results)
@@ -195,7 +199,11 @@ namespace SiaqodbCloudService.Repository
                         {
                             using (var clientLog = new MyCouchClient(DbServerUrl, SyncLogBucket))
                             {
-                                logItem = (await clientLog.Entities.GetAsync<SyncLogItem>(uploadAnchor)).Content;
+                                var item = await clientLog.Documents.GetAsync(uploadAnchor);
+                                if (item.IsSuccess)
+                                {
+                                    logItem = Newtonsoft.Json.JsonConvert.DeserializeObject<SyncLogItem>(item.Content);
+                                }
                             }
                         }
                         foreach (var row in response.Results)
@@ -550,7 +558,8 @@ namespace SiaqodbCloudService.Repository
                             syncLogItem.TimeInserted = DateTime.UtcNow;
                             using (var clientLog = new MyCouchClient(DbServerUrl, SyncLogBucket))
                             {
-                                var logResp = await clientLog.Entities.PostAsync(syncLogItem);
+                                string serLogItem=Newtonsoft.Json.JsonConvert.SerializeObject(syncLogItem);
+                                var logResp = await clientLog.Documents.PostAsync(serLogItem);
                                 cnorResponse.UploadAnchor = logResp.Id;
                             }
                         }
