@@ -490,88 +490,96 @@ namespace SiaqodbCloudService.Repository
         {
             using (var client = new MyCouchClient(DbServerUrl, bucketName))
             {
-               
-                BulkRequest bulkRequest = new BulkRequest();
-               
-                DateTime start = DateTime.Now;
-                int size = 0;
-                SiaqodbDocument crObjForUpdateViews = null;
-                if (batch.ChangedDocuments != null)
-                {
-                    foreach (SiaqodbDocument obj in batch.ChangedDocuments)
-                    {
-                        if (obj != null)
-                        {
-                            if (crObjForUpdateViews == null)
-                                crObjForUpdateViews = obj;
 
-                            await CheckTagsViews(client, bucketName, obj.Tags);
-                            CouchDBDocument doc = Mapper.ToCouchDBDoc(obj);
-                            var serializedObject = client.Serializer.Serialize<CouchDBDocument>(doc);
-                            bulkRequest.Include(serializedObject);
-                            size += serializedObject.Length;
+                var dbExists= await client.Database.HeadAsync();
+                if (dbExists.IsSuccess)
+                {
+                    BulkRequest bulkRequest = new BulkRequest();
+
+                    DateTime start = DateTime.Now;
+                    int size = 0;
+                    SiaqodbDocument crObjForUpdateViews = null;
+                    if (batch.ChangedDocuments != null)
+                    {
+                        foreach (SiaqodbDocument obj in batch.ChangedDocuments)
+                        {
+                            if (obj != null)
+                            {
+                                if (crObjForUpdateViews == null)
+                                    crObjForUpdateViews = obj;
+
+                                await CheckTagsViews(client, bucketName, obj.Tags);
+                                CouchDBDocument doc = Mapper.ToCouchDBDoc(obj);
+                                var serializedObject = client.Serializer.Serialize<CouchDBDocument>(doc);
+                                bulkRequest.Include(serializedObject);
+                                size += serializedObject.Length;
+                            }
                         }
                     }
-                }
-                if (batch.DeletedDocuments != null)
-                {
-                    foreach (DeletedDocument obj in batch.DeletedDocuments)
+                    if (batch.DeletedDocuments != null)
                     {
-                        if (obj != null)
+                        foreach (DeletedDocument obj in batch.DeletedDocuments)
                         {
-                            if (obj.Version != null)//otherwise means is a non-existing object
+                            if (obj != null)
                             {
-                                bulkRequest.Delete(obj.Key, obj.Version);
+                                if (obj.Version != null)//otherwise means is a non-existing object
+                                {
+                                    bulkRequest.Delete(obj.Key, obj.Version);
+                                }
                             }
+
+                        }
+                    }
+                    var response = await client.Documents.BulkAsync(bulkRequest);
+                    if (response.IsSuccess)
+                    {
+                        var cnorResponse = new BatchResponse();
+                        if (response.Rows != null)
+                        {
+                            cnorResponse.BatchItemResponses = new List<BatchItemResponse>();
+                            SyncLogItem syncLogItem = new SyncLogItem();
+                            syncLogItem.KeyVersion = new Dictionary<string, string>();
+                            foreach (var row in response.Rows)
+                            {
+                                BatchItemResponse wresp = new BatchItemResponse();
+                                if (!string.IsNullOrEmpty(row.Error))
+                                {
+                                    cnorResponse.ItemsWithErrors++;
+                                }
+                                wresp.Error = row.Error;
+                                wresp.ErrorDesc = row.Reason;
+                                wresp.Key = row.Id;
+                                wresp.Version = row.Rev;
+                                cnorResponse.BatchItemResponses.Add(wresp);
+                                if (string.IsNullOrEmpty(row.Error))
+                                {
+                                    syncLogItem.KeyVersion.Add(row.Id, row.Rev);
+                                }
+                            }
+                            if (syncLogItem.KeyVersion.Count > 0)
+                            {
+                                syncLogItem.TimeInserted = DateTime.UtcNow;
+                                using (var clientLog = new MyCouchClient(DbServerUrl, SyncLogBucket))
+                                {
+                                    string serLogItem = Newtonsoft.Json.JsonConvert.SerializeObject(syncLogItem);
+                                    var logResp = await clientLog.Documents.PostAsync(serLogItem);
+                                    cnorResponse.UploadAnchor = logResp.Id;
+                                }
+                            }
+                        }
+                        if (crObjForUpdateViews != null)
+                        {
+                            await this.StartRebuildViews(client, crObjForUpdateViews);
                         }
 
+                        return cnorResponse;
                     }
+                    else CheckBucketNotFound(bucketName, response);
                 }
-                var response = await client.Documents.BulkAsync(bulkRequest);
-                if (response.IsSuccess)
+                else if (dbExists.StatusCode == System.Net.HttpStatusCode.NotFound)
                 {
-                    var cnorResponse = new BatchResponse();
-                    if (response.Rows != null)
-                    {
-                        cnorResponse.BatchItemResponses = new List<BatchItemResponse>();
-                        SyncLogItem syncLogItem = new SyncLogItem();
-                        syncLogItem.KeyVersion = new Dictionary<string, string>();
-                        foreach (var row in response.Rows)
-                        {
-                            BatchItemResponse wresp = new BatchItemResponse();
-                            if (!string.IsNullOrEmpty(row.Error))
-                            {
-                                cnorResponse.ItemsWithErrors++;
-                            }
-                            wresp.Error = row.Error;
-                            wresp.ErrorDesc = row.Reason;
-                            wresp.Key = row.Id;
-                            wresp.Version = row.Rev;
-                            cnorResponse.BatchItemResponses.Add(wresp);
-                            if (string.IsNullOrEmpty(row.Error))
-                            {
-                                syncLogItem.KeyVersion.Add(row.Id, row.Rev);
-                            }
-                        }
-                        if (syncLogItem.KeyVersion.Count > 0)
-                        {
-                            syncLogItem.TimeInserted = DateTime.UtcNow;
-                            using (var clientLog = new MyCouchClient(DbServerUrl, SyncLogBucket))
-                            {
-                                string serLogItem=Newtonsoft.Json.JsonConvert.SerializeObject(syncLogItem);
-                                var logResp = await clientLog.Documents.PostAsync(serLogItem);
-                                cnorResponse.UploadAnchor = logResp.Id;
-                            }
-                        }
-                    }
-                    if (crObjForUpdateViews != null)
-                    {
-                        await this.StartRebuildViews(client, crObjForUpdateViews);
-                    }
-                    
-                    return cnorResponse;
+                    throw new BucketNotFoundException(bucketName);
                 }
-                else CheckBucketNotFound(bucketName, response);
                 return null;
 
             }
