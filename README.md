@@ -30,7 +30,7 @@ Example of a JSON record stored in CouchDB database called 'sys_accesskeys':
 
 ## Siaqodb Sync Example
 
-Once you have setup ready and WebAPI running, you can now Sync Siaqodb with CouchDB, example:
+Once you have the setup ready and the WebAPI running, you can Sync Siaqodb with CouchDB, example:
 ```java
   using (SiaqodbSync syncContext = new SiaqodbSync("http://localhost:11735/v0/", 
   "3ba69b5835dgdb308766b4756b00079a", 
