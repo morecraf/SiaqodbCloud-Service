@@ -48,18 +48,25 @@ namespace SiaqodbCloudService.Repository.MongoDB
 
         public async Task<BatchSet> GetAllChanges(string bucketName, int limit, string anchor, string uploadAnchor)
         {
+
+            return await this.GetChanges(bucketName,null, limit, anchor, uploadAnchor);
+        }
+
+        public async Task<BatchSet> GetChanges(string bucketName, Filter query, int limit, string anchor, string uploadAnchor)
+        {
+           
             var client = new MongoClient(DbServerUrl);
             var db = client.GetDatabase("local");
 
             var collection = db.GetCollection<BsonDocument>("oplog.rs");
             var filterBuilder = Builders<BsonDocument>.Filter;
-            FilterDefinition<BsonDocument> filter = filterBuilder.Eq("ns",DbName+"."+bucketName);
+            FilterDefinition<BsonDocument> filter = filterBuilder.Eq("ns", DbName + "." + bucketName);
             if (anchor != null)
             {
-               
+
                 filter = filter & filterBuilder.Gt("ts", new BsonTimestamp(Convert.ToInt64(anchor)));
             }
-            var docs= await collection.Find(filter).Limit(limit).ToListAsync();
+            var docs = await collection.Find(filter).Limit(limit).ToListAsync();
             BatchSet bs = new BatchSet();
             SyncLogItem logItem = null;
             if (docs != null && docs.Count > 0 && !string.IsNullOrEmpty(uploadAnchor))
@@ -69,12 +76,12 @@ namespace SiaqodbCloudService.Repository.MongoDB
 
                 var collectionLog = dbLog.GetCollection<BsonDocument>(SyncLogBucket);
                 var filterLog = Builders<BsonDocument>.Filter.Eq("_id", ObjectId.Parse(uploadAnchor));
-                var syncLogItem= await collectionLog.Find(filterLog).FirstOrDefaultAsync();
+                var syncLogItem = await collectionLog.Find(filterLog).FirstOrDefaultAsync();
                 if (syncLogItem != null)
                 {
                     logItem = new SyncLogItem();
                     logItem.KeyVersion = new Dictionary<string, string>();
-                    var logItemKV =syncLogItem["KeyVersion"].AsBsonDocument;
+                    var logItemKV = syncLogItem["KeyVersion"].AsBsonDocument;
                     foreach (var k in logItemKV.Names)
                     {
                         logItem.KeyVersion.Add(k, logItemKV[k].ToString());
@@ -82,7 +89,7 @@ namespace SiaqodbCloudService.Repository.MongoDB
                 }
 
             }
-            
+
             int i = 0;
             foreach (var doc in docs)
             {
@@ -91,20 +98,23 @@ namespace SiaqodbCloudService.Repository.MongoDB
                 {
                     bs.Anchor = doc["ts"].AsBsonTimestamp.ToString();
                 }
+                i++;
                 if (doc["op"] == "i" || doc["op"] == "u")
                 {
-                    if (bs.ChangedDocuments ==null)
+                    if (bs.ChangedDocuments == null)
                         bs.ChangedDocuments = new List<SiaqodbDocument>();
 
                     var nestedDoc = doc["o"].AsBsonDocument;
                     if (logItem != null && logItem.KeyVersion != null && logItem.KeyVersion.ContainsKey(nestedDoc["_id"].AsString) && logItem.KeyVersion[nestedDoc["_id"].AsString] == nestedDoc["_rev"].AsString)
+                        continue;
+                    if (OutOfFilter(query, nestedDoc))
                         continue;
                     SiaqodbDocument siaqodbDoc = Mapper.ToSiaqodbDocument(nestedDoc);
                     bs.ChangedDocuments.Add(siaqodbDoc);
                 }
                 else if (doc["op"] == "d")
                 {
-                    if(bs.DeletedDocuments ==null)
+                    if (bs.DeletedDocuments == null)
                         bs.DeletedDocuments = new List<DeletedDocument>();
 
                     //check uploaded anchor- means cliet just uploaded this record and we should not return back
@@ -115,16 +125,38 @@ namespace SiaqodbCloudService.Repository.MongoDB
                     delDoc.Key = doc["o"].AsBsonDocument["_id"].AsString;
                     bs.DeletedDocuments.Add(delDoc);
                 }
-               
-                i++;
+
+
             }
             return bs;
-            
         }
 
-        public async Task<BatchSet> GetChanges(string bucketName, Filter query, int limit, string anchor, string uploadAnchor)
+        private bool OutOfFilter(Filter query, BsonDocument nestedDoc)
         {
-            return await this.GetAllChanges(bucketName, limit, anchor, uploadAnchor);
+            if (query == null)
+                return false;
+            string tagName = query.TagName;
+            if (query.TagName == "key")
+            {
+                tagName = "_id";
+            }
+            if (!nestedDoc.Names.Contains(tagName))
+            {
+                return true;
+            }
+
+            IComparable docValue = (IComparable)BsonTypeMapper.MapToDotNetValue(nestedDoc[tagName]);
+            if (query.Value != null && docValue.CompareTo((IComparable)query.Value) != 0)
+            {
+                return true;
+            }
+            if (query.Start != null && docValue.CompareTo((IComparable)query.Start) < 0)
+                return true;
+            if (query.End != null && docValue.CompareTo((IComparable)query.End) > 0)
+                return true;
+
+
+            return false;
         }
 
         public async Task<string> GetSecretAccessKey(string appKeyString)

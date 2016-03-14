@@ -154,13 +154,7 @@ namespace SiaqodbCloudService.Repository
                         }
                         changeSet.Anchor = response.LastSeq;
                     }
-                    int nrChangedObjs = 0;
-                    int nrDeletedObjs = 0;
-                    if (changeSet.ChangedDocuments != null)
-                        nrChangedObjs = changeSet.ChangedDocuments.Count;
-                    if (changeSet.DeletedDocuments != null)
-                        nrDeletedObjs = changeSet.DeletedDocuments.Count;
-
+                    
                     return changeSet;
                 }
                 else CheckBucketNotFound(bucketName, response);
