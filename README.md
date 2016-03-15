@@ -27,7 +27,7 @@ After MongoDB server is started, start mongo shell and initialize replica set on
 ```
 now the collection 'oplog.rs' should be created on 'local' database.
 
-Then create a database called 'siaqodb'.(If you preffer another name, you can change it in src\Repository\MongoDB\MongoDBRepo.cs). Then inside database created, create 2 collections:  'sys_accesskeys' and 'sys_synclog'. (The names can be changed also in \src\Repository\CouchDB\MongoDBRepo.cs ).
+Then create a database called 'siaqodb'.(If you preffer another name, you can change it in src\Repository\MongoDB\MongoDBRepo.cs). Then, inside the database created, create 2 collections:  'sys_accesskeys' and 'sys_synclog'. (The names can be changed also in \src\Repository\CouchDB\MongoDBRepo.cs ).
 
 ## CouchDB
 
