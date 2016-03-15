@@ -9,7 +9,7 @@ using SiaqodbCloudService.Repository.CouchDB;
 using MyCouch.Requests;
 using MyCouch.Responses;
 
-namespace SiaqodbCloudService.Repository
+namespace SiaqodbCloudService.Repository.CouchDB
 {
     class CouchDBRepo : IRepository
     {
@@ -21,7 +21,7 @@ namespace SiaqodbCloudService.Repository
         {
             using (var client = new MyCouchClient(DbServerUrl, bucketName))
             {
-                var startTime = DateTime.Now;
+                
                 if (version == null)
                 {
                     var response = await client.Documents.GetAsync(key);
@@ -98,70 +98,25 @@ namespace SiaqodbCloudService.Repository
 
         public async Task<BatchSet> GetAllChanges(string bucketName, int limit, string anchor,string uploadAnchor)
         {
-            using (var client = new MyCouchClient(DbServerUrl, bucketName))
-            {
-             
-                var size = 0;
-                GetChangesRequest changesReq = new GetChangesRequest();
-                changesReq.Since = anchor;
-                changesReq.Limit = limit;
-                changesReq.IncludeDocs = true;
-                var response = await client.Changes.GetAsync(changesReq);
-                if (response.IsSuccess)
-                {
-                    BatchSet changeSet = new BatchSet();
-                    if (response.Results != null)
-                    {
-                        SyncLogItem logItem = null;
-                        if (!string.IsNullOrEmpty(uploadAnchor))
-                        {
-                            using (var clientLog = new MyCouchClient(DbServerUrl, SyncLogBucket))
-                            {
-                                var item = await clientLog.Documents.GetAsync(uploadAnchor);
-                                if (item.IsSuccess)
-                                {
-                                    logItem = Newtonsoft.Json.JsonConvert.DeserializeObject<SyncLogItem>(item.Content);
-                                }
-                            }
-                        }
-                        foreach (var row in response.Results)
-                        {
-                           
-                            if (row.Deleted)
-                            {
-                                if (changeSet.DeletedDocuments == null)
-                                    changeSet.DeletedDocuments = new List<DeletedDocument>();
-                                DeletedDocument delObj = new DeletedDocument() { Key = row.Id, Version = row.Changes[0].Rev };
-                                //check uploaded anchor- means cliet just uploaded this record and we should not return back
-                                if (logItem != null && logItem.KeyVersion != null && logItem.KeyVersion.ContainsKey(delObj.Key) && logItem.KeyVersion[delObj.Key] == delObj.Version)
-                                    continue;
-                                changeSet.DeletedDocuments.Add(delObj);
-
-                            }
-                            else
-                            {
-                                if (changeSet.ChangedDocuments == null)
-                                    changeSet.ChangedDocuments = new List<SiaqodbDocument>();
-                                size += row.IncludedDoc.Length;
-                                CouchDBDocument co = client.Serializer.Deserialize<CouchDBDocument>(row.IncludedDoc);
-                                if (co._id.StartsWith("_design/"))
-                                    continue;
-                                //check uploaded anchor- means cliet just uploaded this record and we should not return back
-                                if (logItem != null && logItem.KeyVersion != null && logItem.KeyVersion.ContainsKey(co._id) && logItem.KeyVersion[co._id] == co._rev)
-                                    continue;
-                                changeSet.ChangedDocuments.Add(Mapper.ToSiaqodbDocument(co));
-                            }
-                        }
-                        changeSet.Anchor = response.LastSeq;
-                    }
-                    
-                    return changeSet;
-                }
-                else CheckBucketNotFound(bucketName, response);
-                return null;
-
-            }
+            return await this.GetChanges(bucketName, null, limit, anchor, uploadAnchor);
         }
+
+        private async Task<SyncLogItem> GetSyncLogItem(string uploadAnchor)
+        {
+            if (!string.IsNullOrEmpty(uploadAnchor))
+            {
+                using (var clientLog = new MyCouchClient(DbServerUrl, SyncLogBucket))
+                {
+                    var item = await clientLog.Documents.GetAsync(uploadAnchor);
+                    if (item.IsSuccess)
+                    {
+                        return Newtonsoft.Json.JsonConvert.DeserializeObject<SyncLogItem>(item.Content);
+                    }
+                }
+            }
+            return null;
+        }
+
         private static void CheckBucketNotFound(string bucketName, Response response)
         {
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound && response.Reason == "no_db_file")
@@ -175,261 +130,105 @@ namespace SiaqodbCloudService.Repository
         {
             using (var client = new MyCouchClient(DbServerUrl, bucketName))
             {
-                // loggingService.BeforeActionLog(bucketName, "GetChanges", value, anchor);
-                var startTime = DateTime.Now;
+                
                 GetChangesRequest changesReq = new GetChangesRequest();
                 changesReq.Since = anchor;
                 changesReq.Limit = limit;
-                changesReq.IncludeDocs = false;
+                changesReq.IncludeDocs = true;
                 var response = await client.Changes.GetAsync(changesReq);
                 if (response.IsSuccess)
                 {
                     BatchSet changeSet = new BatchSet();
                     if (response.Results != null)
                     {
-                        HashSet<string> changesHashSet = new HashSet<string>();
-                        SyncLogItem logItem = null;
-                        if (!string.IsNullOrEmpty(uploadAnchor))
-                        {
-                            using (var clientLog = new MyCouchClient(DbServerUrl, SyncLogBucket))
-                            {
-                                var item = await clientLog.Documents.GetAsync(uploadAnchor);
-                                if (item.IsSuccess)
-                                {
-                                    logItem = Newtonsoft.Json.JsonConvert.DeserializeObject<SyncLogItem>(item.Content);
-                                }
-                            }
-                        }
+                        SyncLogItem logItem = await this.GetSyncLogItem(uploadAnchor);
+
                         foreach (var row in response.Results)
                         {
-                            if (row.Deleted && !string.IsNullOrEmpty(anchor))
-                            {
-                                if (changeSet.DeletedDocuments == null)
-                                    changeSet.DeletedDocuments = new List<DeletedDocument>();
-                            
-                                DeletedDocument delObj = new DeletedDocument() { Key = row.Id, Version = row.Changes[0].Rev };
-                                //check uploaded anchor- means cliet just uploaded this record and we should not return back
-                                if (logItem != null && logItem.KeyVersion != null && logItem.KeyVersion.ContainsKey(delObj.Key) && logItem.KeyVersion[delObj.Key] == delObj.Version)
-                                    continue;
-                                changeSet.DeletedDocuments.Add(delObj);
 
+                            if (row.Deleted)
+                            {
+                                this.AddDeletedDoc(changeSet, row, logItem);
                             }
                             else
                             {
-                                changesHashSet.Add(row.Id);
+                                this.AddChangedDoc(changeSet, row, logItem, query,client.Serializer );
                             }
                         }
                         changeSet.Anchor = response.LastSeq;
-                        HashSet<string> changesHashSetOfQuery = await GetDocIdsByQuery(client, query);
+                    }
 
-                        HashSet<string> docsIds = Intersect(changesHashSet, changesHashSetOfQuery);
-                        if (docsIds.Count > 0)
-                        {
-                            int i = 0;
-                            changeSet.ChangedDocuments = new List<SiaqodbDocument>();
-                            List<string> docsPart = new List<string>();
-                            foreach (string docId in docsIds)
-                            {
-                                docsPart.Add(docId);
-                                if (i % 100 == 0 && i > 0)
-                                {
-                                    var resultSet = await this.GetByTag(client, PrepareQueryIN(docsPart));
-                                    foreach (SiaqodbDocument document in resultSet)
-                                    {
-                                        //check uploaded anchor- means cliet just uploaded this record and we should not return back
-                                        if (logItem != null && logItem.KeyVersion != null && logItem.KeyVersion.ContainsKey(document.Key) && logItem.KeyVersion[document.Key] == document.Version)
-                                            continue;
-                                        ((List<SiaqodbDocument>)changeSet.ChangedDocuments).Add(document);
-                                    }
-
-                                    docsPart = new List<string>();
-                                }
-                                i++;
-                            }
-                            if (docsPart.Count > 0)
-                            {
-                                var resultSet = await this.GetByTag(client, PrepareQueryIN(docsPart));
-
-                                foreach (SiaqodbDocument document in resultSet)
-                                {
-                                    //check uploaded anchor- means cliet just uploaded this record and we should not return back
-                                    if (logItem != null && logItem.KeyVersion != null && logItem.KeyVersion.ContainsKey(document.Key) && logItem.KeyVersion[document.Key] == document.Version)
-                                        continue;
-                                    ((List<SiaqodbDocument>)changeSet.ChangedDocuments).Add(document);
-                                }
-
-
-                            }
-                        }
-
-                    }                   
                     return changeSet;
                 }
                 else CheckBucketNotFound(bucketName, response);
                 return null;
 
             }
+        
         }
-        private async Task<List<SiaqodbDocument>> GetByTag(MyCouchClient client, Filter value, string bucketName = "")
-        {
-           
-            var nrViews = 0;
-            bool isKey = false;
-            if (String.Compare(value.TagName, "key", StringComparison.OrdinalIgnoreCase) == 0)
-            {
-                isKey = true;
-                var viewsInfo = await CheckViewsAndReturnNumber(client.Connection.DbName, client);
-                nrViews = viewsInfo.Item2;
-                SkipDesignDocs(value, viewsInfo);
-            }
-            var query = PrepareQuery(value);
-            query.IncludeDocs = true;
 
-            var size = 0;
-           
-            var response = await client.Views.QueryAsync(query);
-            if (response.IsSuccess)
-            {
-               
-
-                List<SiaqodbDocument> list = new List<SiaqodbDocument>();
-                if (response.Rows != null)
-                {
-                    foreach (var row in response.Rows)
-                    {
-                        if (row.Id != null && row.IncludedDoc != null)
-                        {
-                            size += row.IncludedDoc.Length;
-                            CouchDBDocument co = client.Serializer.Deserialize<CouchDBDocument>(row.IncludedDoc);
-                            if (isKey && co._id.StartsWith("_design/"))
-                                continue;
-                            list.Add(Mapper.ToSiaqodbDocument(co));
-                        }
-                    }
-                }
-                             
-                return list;
-            }
-            else if (response.Reason == "missing" && response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            {
-                //tag not found
-                return new List<SiaqodbDocument>();
-            }
-            else CheckBucketNotFound(bucketName, response);
-            return null;
-        }
-        private void SkipDesignDocs(Filter value, Tuple<long, int> viewsInfo)
+        private void AddChangedDoc(BatchSet changeSet, ChangesResponse<string>.Row row, SyncLogItem logItem, Filter query, MyCouch.Serialization.ISerializer serializer)
         {
-            if (!value.Skip.HasValue && !value.Limit.HasValue)//from Sync/GetChanges
-            {
+            if (changeSet.ChangedDocuments == null)
+                changeSet.ChangedDocuments = new List<SiaqodbDocument>();
+            CouchDBDocument co = serializer.Deserialize<CouchDBDocument>(row.IncludedDoc);
+            if (co._id.StartsWith("_design/"))
                 return;
-            }
-            int skip = value.Skip == null ? 0 : value.Skip.Value;
-            int limit = value.Limit == null ? 0 : value.Limit.Value;
-            SkipDesignDocs(ref skip, ref limit, viewsInfo);
-            value.Skip = skip;
-            value.Limit = limit;
+            //check uploaded anchor- means cliet just uploaded this record and we should not return back
+            if (logItem != null && logItem.KeyVersion != null && logItem.KeyVersion.ContainsKey(co._id) && logItem.KeyVersion[co._id] == co._rev)
+                return;
+            if (OutOfFilter(query, co))
+                return;
+            changeSet.ChangedDocuments.Add(Mapper.ToSiaqodbDocument(co));
         }
-        private void SkipDesignDocs(ref int skip, ref int limit, Tuple<long, int> viewsInfo)
+
+        private bool OutOfFilter(Filter query, CouchDBDocument co)
         {
-            if (skip + limit > viewsInfo.Item1
-                && skip <= viewsInfo.Item1)
-                limit += viewsInfo.Item2;
-
-            if (skip > viewsInfo.Item1)
-                skip += viewsInfo.Item2;
-        }
-        /// <summary>
-        /// TODO improve this and do not check for every query
-        /// Problem is Offset of _design/viewName which can change after every insert
-        /// </summary>
-        /// <param name="bucketName"></param>
-        /// <param name="client"></param>
-        /// <returns></returns>
-        private async Task<Tuple<long, int>> CheckViewsAndReturnNumber(string bucketName, MyCouchClient client)
-        {
-            long offset = 0;
-            int nrViews = 0;
-
-            QueryViewRequest query = new QueryViewRequest("_all_docs");
-            query.StartKey = "_design/";
-            query.EndKey = "_design0";
-
-            var all = await client.Views.QueryAsync(query);
-            if (!all.IsSuccess)
-                CheckBucketNotFound(bucketName, all);
-
-            offset = all.OffSet;
-            nrViews = all.Rows != null ? all.Rows.Count() : 0;
-
-            return new Tuple<long, int>(offset, nrViews);
-        }
-        private async Task<HashSet<string>> GetDocIdsByQuery(MyCouchClient client, Filter value)
-        {
-            HashSet<string> changesHashSetOfQuery = new HashSet<string>();
-            var couchQuery = PrepareQuery(value);
-
-            DateTime start = DateTime.Now;
-            var responseQuery = await client.Views.QueryAsync(couchQuery);
-            if (responseQuery.IsSuccess)
+            if (query == null)
+                return false;
+            string tagName = query.TagName;
+            if (query.TagName == "key")
             {
-                if (responseQuery.Rows != null)
-                {
-                    foreach (var row in responseQuery.Rows)
-                    {
-                        if (row.Id != null)
-                        {
-                            changesHashSetOfQuery.Add(row.Id);
-                        }
-                    }
-                }
+                tagName = "_id";
             }
-
-            return changesHashSetOfQuery;
-        }
-        private QueryViewRequest PrepareQuery(Filter value)
-        {
-            string viewName = "tags_" + value.TagName;
-            QueryViewRequest query = null;
-            if (string.Compare(value.TagName, "key", true) == 0)
+            else if (!co.tags.Keys.Contains(tagName))
             {
-                query = new QueryViewRequest("_all_docs");
+                return true;
+            }
+            IComparable docValue = null;
+            if (query.TagName == "key")
+            {
+                docValue = co._id;
             }
             else
             {
-                query = new QueryViewRequest(viewName, viewName);
+                docValue = co.tags[tagName] as IComparable;
             }
-            query.StartKey = value.Start;
-            query.EndKey = value.End;
-            query.Key = value.Value;
-            query.Limit = value.Limit;
-            query.Skip = value.Skip;
-            query.Keys = value.In;
-            query.Descending = value.Descending;
-            return query;
-        }
-        private HashSet<string> Intersect(HashSet<string> hashSet1, HashSet<string> hashSet2)
-        {
-            if (hashSet1.Count < hashSet2.Count)
+            
+            if (query.Value != null && docValue.CompareTo((IComparable)query.Value) != 0)
             {
-                hashSet1.IntersectWith(hashSet2);
-                return hashSet1;
-
+                return true;
             }
-            else
-            {
-                hashSet2.IntersectWith(hashSet1);
-                return hashSet2;
+            if (query.Start != null && docValue.CompareTo((IComparable)query.Start) < 0)
+                return true;
+            if (query.End != null && docValue.CompareTo((IComparable)query.End) > 0)
+                return true;
 
-            }
+
+            return false;
         }
-        private Filter PrepareQueryIN(List<string> ids)
+
+        private void AddDeletedDoc(BatchSet changeSet, ChangesResponse<string>.Row row, SyncLogItem logItem)
         {
-            Filter queryFinal = new Filter();
-            queryFinal.In = ids.ToArray();
-            queryFinal.TagName = "key";
-            return queryFinal;
+            if (changeSet.DeletedDocuments == null)
+                changeSet.DeletedDocuments = new List<DeletedDocument>();
+            DeletedDocument delObj = new DeletedDocument() { Key = row.Id, Version = row.Changes[0].Rev };
+            //check uploaded anchor- means cliet just uploaded this record and we should not return back
+            if (logItem != null && logItem.KeyVersion != null && logItem.KeyVersion.ContainsKey(delObj.Key) && logItem.KeyVersion[delObj.Key] == delObj.Version)
+                return;
+            changeSet.DeletedDocuments.Add(delObj);
         }
+
         public async Task<string> GetSecretAccessKey(string accessKeyId)
         {
             using (var client = new MyCouchClient(DbServerUrl, AccessKeysBucket))

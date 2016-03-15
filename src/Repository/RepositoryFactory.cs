@@ -10,8 +10,9 @@ namespace SiaqodbCloudService.Repository
     {
         public static IRepository GetRepository()
         {
-            //add here MongoDB, etc
-            return new MongoDB.MongoDBRepo();
+            
+             return new MongoDB.MongoDBRepo();
+            //return new CouchDB.CouchDBRepo();
         }
     }
 }

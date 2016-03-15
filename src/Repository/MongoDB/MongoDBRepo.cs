@@ -18,15 +18,24 @@ namespace SiaqodbCloudService.Repository.MongoDB
         private const string DbName = "siaqodb";
         private const string AccessKeysBucket = "sys_accesskeys";
         private const string SyncLogBucket = "sys_synclog";
-
+        private MongoClient client;
+        public MongoDBRepo()
+        {
+            client= new MongoClient(DbServerUrl); 
+        }
         public async Task<StoreResponse> Delete(string bucketName, string key, string version)
         {
-            throw new NotImplementedException();
+            var db = client.GetDatabase(DbName);
+            var collection = db.GetCollection<BsonDocument>(bucketName);
+            var filter = Builders<BsonDocument>.Filter.Eq("_id", key);
+
+            var result=await collection.DeleteOneAsync(filter);
+            return new StoreResponse { Key = key, Version = version };
         }
 
         public async Task<SiaqodbDocument> Get(string bucketName, string key, string version)
         {
-            var client = new MongoClient(DbServerUrl);
+           
             var db = client.GetDatabase(DbName);
             
             var collection = db.GetCollection<BsonDocument>(bucketName);
@@ -55,7 +64,7 @@ namespace SiaqodbCloudService.Repository.MongoDB
         public async Task<BatchSet> GetChanges(string bucketName, Filter query, int limit, string anchor, string uploadAnchor)
         {
            
-            var client = new MongoClient(DbServerUrl);
+          
             var db = client.GetDatabase("local");
 
             var collection = db.GetCollection<BsonDocument>("oplog.rs");
@@ -63,7 +72,6 @@ namespace SiaqodbCloudService.Repository.MongoDB
             FilterDefinition<BsonDocument> filter = filterBuilder.Eq("ns", DbName + "." + bucketName);
             if (anchor != null)
             {
-
                 filter = filter & filterBuilder.Gt("ts", new BsonTimestamp(Convert.ToInt64(anchor)));
             }
             var docs = await collection.Find(filter).Limit(limit).ToListAsync();
@@ -71,23 +79,7 @@ namespace SiaqodbCloudService.Repository.MongoDB
             SyncLogItem logItem = null;
             if (docs != null && docs.Count > 0 && !string.IsNullOrEmpty(uploadAnchor))
             {
-
-                var dbLog = client.GetDatabase(DbName);
-
-                var collectionLog = dbLog.GetCollection<BsonDocument>(SyncLogBucket);
-                var filterLog = Builders<BsonDocument>.Filter.Eq("_id", ObjectId.Parse(uploadAnchor));
-                var syncLogItem = await collectionLog.Find(filterLog).FirstOrDefaultAsync();
-                if (syncLogItem != null)
-                {
-                    logItem = new SyncLogItem();
-                    logItem.KeyVersion = new Dictionary<string, string>();
-                    var logItemKV = syncLogItem["KeyVersion"].AsBsonDocument;
-                    foreach (var k in logItemKV.Names)
-                    {
-                        logItem.KeyVersion.Add(k, logItemKV[k].ToString());
-                    }
-                }
-
+                logItem = await GetSyncLogItem(uploadAnchor);
             }
 
             int i = 0;
@@ -101,34 +93,67 @@ namespace SiaqodbCloudService.Repository.MongoDB
                 i++;
                 if (doc["op"] == "i" || doc["op"] == "u")
                 {
-                    if (bs.ChangedDocuments == null)
-                        bs.ChangedDocuments = new List<SiaqodbDocument>();
-
-                    var nestedDoc = doc["o"].AsBsonDocument;
-                    if (logItem != null && logItem.KeyVersion != null && logItem.KeyVersion.ContainsKey(nestedDoc["_id"].AsString) && logItem.KeyVersion[nestedDoc["_id"].AsString] == nestedDoc["_rev"].AsString)
-                        continue;
-                    if (OutOfFilter(query, nestedDoc))
-                        continue;
-                    SiaqodbDocument siaqodbDoc = Mapper.ToSiaqodbDocument(nestedDoc);
-                    bs.ChangedDocuments.Add(siaqodbDoc);
+                    this.AddChangedDoc(bs, doc, logItem, query);
                 }
                 else if (doc["op"] == "d")
                 {
-                    if (bs.DeletedDocuments == null)
-                        bs.DeletedDocuments = new List<DeletedDocument>();
-
-                    //check uploaded anchor- means cliet just uploaded this record and we should not return back
-                    if (logItem != null && logItem.KeyVersion != null && logItem.KeyVersion.ContainsKey(doc["o"].AsBsonDocument["_id"].AsString))
-                        continue;
-
-                    DeletedDocument delDoc = new DeletedDocument();
-                    delDoc.Key = doc["o"].AsBsonDocument["_id"].AsString;
-                    bs.DeletedDocuments.Add(delDoc);
+                    this.AddDeletedDoc(bs, doc, logItem);
                 }
 
 
             }
             return bs;
+        }
+
+        private void AddDeletedDoc(BatchSet bs, BsonDocument doc, SyncLogItem logItem)
+        {
+            if (bs.DeletedDocuments == null)
+                bs.DeletedDocuments = new List<DeletedDocument>();
+
+            //check uploaded anchor- means cliet just uploaded this record and we should not return back
+            if (logItem != null && logItem.KeyVersion != null && logItem.KeyVersion.ContainsKey(doc["o"].AsBsonDocument["_id"].AsString))
+                return;
+
+            DeletedDocument delDoc = new DeletedDocument();
+            delDoc.Key = doc["o"].AsBsonDocument["_id"].AsString;
+            bs.DeletedDocuments.Add(delDoc);
+        }
+
+        private void AddChangedDoc(BatchSet bs, BsonDocument doc, SyncLogItem logItem, Filter query)
+        {
+
+            if (bs.ChangedDocuments == null)
+                bs.ChangedDocuments = new List<SiaqodbDocument>();
+
+            var nestedDoc = doc["o"].AsBsonDocument;
+            if (logItem != null && logItem.KeyVersion != null && logItem.KeyVersion.ContainsKey(nestedDoc["_id"].AsString) && logItem.KeyVersion[nestedDoc["_id"].AsString] == nestedDoc["_rev"].AsString)
+                return;
+            if (OutOfFilter(query, nestedDoc))
+                return;
+            SiaqodbDocument siaqodbDoc = Mapper.ToSiaqodbDocument(nestedDoc);
+            bs.ChangedDocuments.Add(siaqodbDoc);
+
+        }
+
+        private async Task<SyncLogItem> GetSyncLogItem(string uploadAnchor)
+        {
+            var dbLog = client.GetDatabase(DbName);
+
+            var collectionLog = dbLog.GetCollection<BsonDocument>(SyncLogBucket);
+            var filterLog = Builders<BsonDocument>.Filter.Eq("_id", ObjectId.Parse(uploadAnchor));
+            var syncLogItem = await collectionLog.Find(filterLog).FirstOrDefaultAsync();
+            if (syncLogItem != null)
+            {
+                var logItem = new SyncLogItem();
+                logItem.KeyVersion = new Dictionary<string, string>();
+                var logItemKV = syncLogItem["KeyVersion"].AsBsonDocument;
+                foreach (var k in logItemKV.Names)
+                {
+                    logItem.KeyVersion.Add(k, logItemKV[k].ToString());
+                }
+                return logItem;
+            }
+            return null;
         }
 
         private bool OutOfFilter(Filter query, BsonDocument nestedDoc)
@@ -161,12 +186,17 @@ namespace SiaqodbCloudService.Repository.MongoDB
 
         public async Task<string> GetSecretAccessKey(string appKeyString)
         {
-            return "4362kljh63k4599hhgm";
+            var db = client.GetDatabase(DbName);
+            var collection = db.GetCollection<BsonDocument>(AccessKeysBucket);
+            var accessKeyDoc = await collection.Find(filter: new BsonDocument { { "_id", appKeyString } }).FirstOrDefaultAsync();
+            if (accessKeyDoc != null && accessKeyDoc.Names.Contains("secretkey"))
+                return accessKeyDoc["secretkey"].AsString;
+            return null;
         }
 
         public async Task<StoreResponse> Store(string bucketName, SiaqodbDocument document)
         {
-            var client = new MongoClient(DbServerUrl);
+           
             var db = client.GetDatabase(DbName);
 
             var collection = db.GetCollection<BsonDocument>(bucketName);
@@ -195,9 +225,9 @@ namespace SiaqodbCloudService.Repository.MongoDB
 
         public async Task<BatchResponse> Store(string bucketName, BatchSet value)
         {
-            var client = new MongoClient(DbServerUrl);
+
             var db = client.GetDatabase(DbName);
-            
+
             var collection = db.GetCollection<BsonDocument>(bucketName);
             var response = new BatchResponse();
             response.BatchItemResponses = new List<BatchItemResponse>();
@@ -210,34 +240,58 @@ namespace SiaqodbCloudService.Repository.MongoDB
                 newDoc["_rev"] = this.GenerateNewVersion();
                 try
                 {
+                    var exists = await collection.Find(filter: new BsonDocument { { "_id", document.Key } }).FirstOrDefaultAsync();
+                    if (exists == null && !string.IsNullOrEmpty( document.Version))//somebody else deleted the doc-> conflict
+                    {
+                        BatchItemResponse respWithError = BuildResponseWithError(document.Key, document.Version, "conflict");
+                        response.ItemsWithErrors++;
+                        response.BatchItemResponses.Add(respWithError);
+                        continue;
+                    }
                     var result = await collection.ReplaceOneAsync(filter: new BsonDocument { { "_id", document.Key }, { "_rev", BsonTypeMapper.MapToBsonValue(document.Version) } },
                                                                     options: new UpdateOptions { IsUpsert = true },
                                                                      replacement: newDoc);
-                    BatchItemResponse itemResp = new BatchItemResponse();
-                    itemResp.Key = document.Key;
-                    itemResp.Version = newDoc["_rev"].AsString;
+                    BatchItemResponse itemResp = new BatchItemResponse
+                    {
+                        Key = document.Key,
+                        Version = newDoc["_rev"].AsString
+                    };
                     response.BatchItemResponses.Add(itemResp);
                     syncLogItem.KeyVersion.Add(itemResp.Key, itemResp.Version);
 
                 }
                 catch (MongoWriteException ex)
                 {
-                    BatchItemResponse itemResp = new BatchItemResponse();
-                    itemResp.Key = document.Key;
-                    itemResp.Version = document.Version;
+                    string error = ex.Message;
                     if (ex.Message.Contains("duplicate key"))//conflict
                     {
-                        itemResp.Error = "conflict";
-                        itemResp.ErrorDesc = "conflict";//TODO better desc
-                      
+                        error = "conflict";
                     }
-                    else
-                    {
-                        itemResp.Error = ex.Message;
-                        itemResp.ErrorDesc = ex.Message;  
-                    }
+                    var itemResp = BuildResponseWithError(document.Key, document.Version, error);
+                    response.ItemsWithErrors++;
                     response.BatchItemResponses.Add(itemResp);
                 }
+
+            }
+            foreach (var document in value.DeletedDocuments)
+            {
+                BatchItemResponse itemResp = new BatchItemResponse()
+                {
+                    Key = document.Key,
+                    Version = document.Version
+                };
+                var del=await collection.DeleteOneAsync(filter: new BsonDocument { { "_id", document.Key }, { "_rev", BsonTypeMapper.MapToBsonValue(document.Version) } });
+                if (del.DeletedCount == 0)
+                {
+                    var docFromDB= collection.Find(filter: new BsonDocument { { "_id", document.Key } }).FirstOrDefaultAsync();
+                    if (docFromDB != null)
+                    {
+                        itemResp.Error = "conflict";
+                        itemResp.ErrorDesc = "conflict";
+                        response.ItemsWithErrors++;
+                    }
+                }
+                response.BatchItemResponses.Add(itemResp);
 
             }
             //store uploadedAnchor
@@ -253,6 +307,18 @@ namespace SiaqodbCloudService.Repository.MongoDB
             }
 
             return response;
+        }
+
+        private BatchItemResponse BuildResponseWithError(string key, string version, string error)
+        {
+            BatchItemResponse itemResp = new BatchItemResponse()
+            {
+                Key = key,
+                Version = version,
+                Error = error,
+                ErrorDesc = error
+            };
+            return itemResp;
         }
 
         private BsonValue GenerateNewVersion()
