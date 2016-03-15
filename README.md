@@ -18,7 +18,7 @@ replication:
 ```
 Start mongod with this config(example on Windows: "C:\mongodb\bin\mongod.exe" --config "C:\mongodb\mongo.cfg" ).
 The important section in the above config is the 'replication' section which will enable MongoDB to store all changes in oplog.rs collection. The entire Sync process relies on  [Mongo's oplog](https://docs.mongodb.org/manual/core/replica-set-oplog/).
-After MongoDB server is started, start mongo shelll and initialize replica set on 'local' database:
+After MongoDB server is started, start mongo shell and initialize replica set on 'local' database:
 ```json
 
 >use local
