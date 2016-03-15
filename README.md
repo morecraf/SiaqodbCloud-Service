@@ -18,7 +18,16 @@ replication:
 ```
 Start mongod with this config(example on Windows: "C:\mongodb\bin\mongod.exe" --config "C:\mongodb\mongo.cfg" ).
 The important section in the above config is the 'replication' section which will enable MongoDB to store all changes in oplog.rs collection. The entire Sync process relies on  [Mongo's oplog](https://docs.mongodb.org/manual/core/replica-set-oplog/).
-After MongoDB server is started, create a database called 'siaqodb'.(If you preffer another name, you can change it in src\Repository\MongoDB\MongoDBRepo.cs). Then inside database created, create 2 collections:  'sys_accesskeys' and 'sys_synclog'. (The names can be changed also in \src\Repository\CouchDB\MongoDBRepo.cs ).
+After MongoDB server is started, start mongo shelll and initialize replica set on 'local' database:
+```json
+
+>use local
+>rs.initiate()
+
+```
+now the collection 'oplog.rs' should be created on 'local' database.
+
+Then create a database called 'siaqodb'.(If you preffer another name, you can change it in src\Repository\MongoDB\MongoDBRepo.cs). Then inside database created, create 2 collections:  'sys_accesskeys' and 'sys_synclog'. (The names can be changed also in \src\Repository\CouchDB\MongoDBRepo.cs ).
 
 ## CouchDB
 
