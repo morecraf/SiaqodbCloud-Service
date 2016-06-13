@@ -56,7 +56,18 @@ Example of a JSON record stored in CouchDB database or MongoDB collection called
 
 ## Siaqodb Sync Example
 
-Once you have the setup ready and the WebAPI running, you can Sync Siaqodb with MongoDB or CouchDB. A Siaqodb bucket has as correspondent a collection in MongoDB and a database in CouchDB. So before the sync, be sure you have created those collections/databases at the server side.  Example:
+Once you have the setup ready and the WebAPI running, you can Sync Siaqodb with MongoDB or CouchDB. 
+You can choose the backend db(MongoDB or CouchDB) by modifying Repository/RepositoryFactory.cs :
+```java
+public static IRepository GetRepository()
+        {
+            
+             return new MongoDB.MongoDBRepo();
+            //return new CouchDB.CouchDBRepo();
+        }
+```
+
+A Siaqodb bucket has as correspondent a collection in MongoDB and a database in CouchDB. So before the sync, be sure you have created those collections/databases at the server side.  Example:
 
 ```java
   using (SiaqodbSync syncContext = new SiaqodbSync("http://localhost:11735/v0/", 
