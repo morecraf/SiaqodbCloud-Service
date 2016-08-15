@@ -15,9 +15,12 @@ namespace SiaqodbCloudService.Repository.MongoDB
             doc["_id"] = cobj.Key;
             doc["_rev"] = BsonTypeMapper.MapToBsonValue(cobj.Version);
             doc["doc"] = cobj.Content;
-            foreach (string tagName in cobj.Tags.Keys)
+            if (cobj.Tags != null)
             {
-                doc[tagName] = BsonTypeMapper.MapToBsonValue(cobj.Tags[tagName]);
+                foreach (string tagName in cobj.Tags.Keys)
+                {
+                    doc[tagName] = BsonTypeMapper.MapToBsonValue(cobj.Tags[tagName]);
+                }
             }
             return doc;
         }
