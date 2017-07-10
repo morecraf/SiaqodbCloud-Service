@@ -1,7 +1,11 @@
 
 ## SiaqodbCloud
 
-SiaqodbCloud is a RESTful web service through which you can synchronize [Siaqodb](http://siaqodb.com) from client side( Windows, WindowsStore, Xamarin) with a server side NoSQL database like MongoDB or CouchDB.
+SiaqodbCloud is a RESTful web service through which you can synchronize [Siaqodb](http://siaqodb.com) from client side (Windows, WindowsStore, Xamarin) with a server side NoSQL database like MongoDB or CouchDB.
+
+## Documentation
+For the most up-to-date documentation, please refer to the Siaqodb documentation here:
+(http://siaqodb.com/docs/Synchronization-SiaqodbCloud)
 
 ## MongoDB
 
